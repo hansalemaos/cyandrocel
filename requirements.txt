@@ -1,0 +1,6 @@
+Cython
+numpy
+pandas
+regex
+setuptools
+ziglang
