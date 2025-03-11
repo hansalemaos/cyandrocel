@@ -940,6 +940,12 @@ Don't forget to give the project a star! Thanks again!
 Distributed under the MIT License. See `LICENSE` for more information.
 
 
+## More tutorials
+
+[![Video](https://img.youtube.com/vi/Abo_kqAmRbM/0.jpg)](https://www.youtube.com/watch?v=Abo_kqAmRbM) 
+
+[![Video](https://img.youtube.com/vi/J9MEvutzH0g/0.jpg)](https://www.youtube.com/watch?v=J9MEvutzH0g) 
+
 ## Contact
 
 If you’re interested in private classes with me to learn strategies for automating anything, or if you have an automation project (within legal boundaries!) that you’d like to bring to life, feel free to contact me. I speak German, English, and Portuguese fluently, and Spanish proficiently.
