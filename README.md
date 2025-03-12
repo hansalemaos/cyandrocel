@@ -19,7 +19,7 @@
 
 **CyAndroCel** is a powerful [**Python**](https://www.python.org/) library designed for advanced Android automation. For performance reasons, it’s primarily written in [**C++**](https://cplusplus.com/) and [**Cython**](https://cython.readthedocs.io/), providing multiple backends for interacting with UI elements, handling input events, and efficiently extracting screen data.
 
-**CyAndroCel** is designed to run on non-rooted devices and depends on [**ADB**](https://developer.android.com/tools/adb). If you need a version that runs directly and independently on an emulator or rooted device without relying on ADB, check outt [**CyAndroCel**](https://github.com/hansalemaos/cyandrocel)
+**CyAndroCel** is designed to run on non-rooted devices and depends on [**ADB**](https://developer.android.com/tools/adb). If you need a version that runs directly and independently on an emulator or rooted device without relying on ADB, check outt [**CyAndroEmu**](https://github.com/hansalemaos/cyandroemu)
 
 ---
 
