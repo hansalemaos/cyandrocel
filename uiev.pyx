@@ -1652,11 +1652,11 @@ cdef class UiAutomator2:
 
     cpdef install_apks(self):
         subprocess_run(
-            [self.adb_exe, "-s", self.device_id, "pm", "install", "-g", self.save_path1],
+            [self.adb_exe, "-s", self.device_id,  "install", "-g", self.save_path1],
             **{"env":os_environ,**invisibledict,**self.kwargs}
         )
         subprocess_run(
-            [self.adb_exe, "-s", self.device_id, "pm", "install", "-g", self.save_path2],
+            [self.adb_exe, "-s", self.device_id, "install", "-g", self.save_path2],
             **{"env":os_environ,**invisibledict,**self.kwargs}
         )
 
