@@ -906,7 +906,433 @@ get_df_lsof(self, timeout=1000000)
 
 ```
 
+## Non-Adb shell API
 
+```py
+class Adb
+ |  Adb(unicode exefile, unicode device_id, kwargs)
+ |
+ |      A class to encapsulate Android Debug Bridge (ADB) functionalities.
+ |
+ |      This class provides methods for interacting with Android devices via ADB commands.
+ |      It supports operations such as pushing scripts to the device, setting up TCP port
+ |      forwarding/reversal, starting or killing the ADB server, pairing devices, retrieving
+ |      connected devices, and uninstalling APKs.
+ |
+ |      Attributes
+ |      ----------
+ |      exefile : str
+ |          The path to the ADB executable (processed by get_short_path_name for compatibility).
+ |      device_id : str
+ |          The unique identifier of the target Android device.
+ |      kwargs : dict
+ |          Additional keyword arguments to pass to subprocess calls.
+ |
+ |  Methods defined here:
+ |
+ |  __init__(...)
+ |
+ |      Initialize an Adb instance.
+ |
+ |      Parameters
+ |      ----------
+ |      exefile : str
+ |          The path to the ADB executable.
+ |      device_id : str
+ |          The unique identifier of the target Android device.
+ |      kwargs : object
+ |          Additional keyword arguments to be used in subprocess calls.
+ |
+ |
+ |  connect(self)
+ |              Establish a network connection to the device via ADB.
+ |
+ |              This method initiates a connection to the device over the network using ADB. It is
+ |              typically used after the ADB server has been restarted in TCP mode.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that connects to the specified device.
+ |
+ |              Notes
+ |              -----
+ |              The command executed is equivalent to:
+ |                  adb connect <device_id>
+ |              ensuring that the device is accessible over the network.
+ |
+ |  forward_tcp_port(self, port_pc, port_device)
+ |              Set up forward TCP port forwarding from the device to the host.
+ |
+ |              Parameters
+ |              ----------
+ |              port_pc : int
+ |                  The TCP port number on the host (PC).
+ |              port_device : int
+ |                  The TCP port number on the device.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that sets up forward TCP forwarding.
+ |
+ |  get_all_devices(self)
+ |              Retrieve a dictionary of all connected devices.
+ |
+ |              This method returns a dictionary of devices detected by ADB.
+ |
+ |              Returns
+ |              -------
+ |              dict
+ |                  A dictionary mapping device identifiers to their details.
+ |
+ |  get_forwarded_ports(self)
+ |              Retrieve a list of forwarded TCP ports on the device.
+ |
+ |              This method returns the list of port mappings that have been set up for TCP forwarding
+ |              from the device to the host.
+ |
+ |              Returns
+ |              -------
+ |              list
+ |                  A list of forwarded TCP port mappings.
+ |
+ |  get_reversed_ports(self)
+ |              Retrieve a list of reversed TCP ports on the device.
+ |
+ |              This method returns the list of port mappings that have been set up for reverse TCP
+ |              forwarding on the device.
+ |
+ |              Returns
+ |              -------
+ |              list
+ |                  A list of reversed TCP port mappings.
+ |
+ |  install_apk(self, path)
+ |              Install an APK on the device without forcing an overwrite.
+ |
+ |              This method installs an APK using the standard ADB installation command without
+ |              additional overwrite flags. It assumes the app is not already installed, or that
+ |              its presence does not interfere with the installation.
+ |
+ |              Parameters
+ |              ----------
+ |              path : str
+ |                  The full path to the APK file to be installed.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call executing the ADB installation command.
+ |
+ |              Notes
+ |              -----
+ |              The underlying command executed is equivalent to:
+ |                  adb -s <device_id> install <processed_path>
+ |              where <processed_path> is derived from the provided path.
+ |
+ |  install_apk_as_test(self, path)
+ |              Install an APK on the device in test mode.
+ |
+ |              This method installs an APK using ADB with the test (-t) flag and grants all runtime
+ |              permissions (-g). The provided APK path is processed by get_short_path_name to ensure
+ |              compatibility with the operating system (especially on Windows).
+ |
+ |              Parameters
+ |              ----------
+ |              path : str
+ |                  The full path to the APK file that should be installed on the device.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call which performs the installation. This object
+ |                  contains the output and return code from the adb install command.
+ |
+ |              Notes
+ |              -----
+ |              The underlying command executed is equivalent to:
+ |                  adb -s <device_id> install -g -t <shortened_path>
+ |              where:
+ |              - The "-g" flag automatically grants all runtime permissions.
+ |              - The "-t" flag allows installation of test packages.
+ |              - <shortened_path> is obtained by applying get_short_path_name to the provided path.
+ |
+ |  install_apk_overwrite(self, path)
+ |              Install an APK on the device, overwriting any existing installation.
+ |
+ |              This method installs an APK by forcing an overwrite (typically using the '-r'
+ |              flag) so that any previously installed version of the application is replaced.
+ |
+ |              Parameters
+ |              ----------
+ |              path : str
+ |                  The full path to the APK file that should be installed.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call executing the ADB command for installation.
+ |
+ |              Notes
+ |              -----
+ |              The underlying command is equivalent to:
+ |                  adb -s <device_id> install -r <processed_path>
+ |              where <processed_path> is obtained via get_short_path_name for compatibility.
+ |
+ |  kill_server(self)
+ |              Kill the ADB server.
+ |
+ |              This method stops the running ADB server.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that kills the ADB server.
+ |
+ |  pair(self, code)
+ |              Pair the device using a provided pairing code.
+ |
+ |              Parameters
+ |              ----------
+ |              code : str
+ |                  The pairing code used to pair the device.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that pairs the device.
+ |
+ |  pull_folder(self, src, dst)
+ |              Pull a folder from the device to the host machine.
+ |
+ |              This method downloads the contents of a folder from the Android device to a specified
+ |              destination on the host machine.
+ |
+ |              Parameters
+ |              ----------
+ |              src : str
+ |                  The source folder path on the device.
+ |              dst : str
+ |                  The destination folder path on the host.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that performs the folder pull operation.
+ |
+ |              Notes
+ |              -----
+ |              The internal command is analogous to:
+ |                  adb -s <device_id> pull <src> <dst>
+ |              ensuring that the folder and its contents are transferred to the host.
+ |
+ |  push_files_to_folder(self, all_paths, folder_on_device)
+ |              Push multiple files from the host to a folder on the device.
+ |
+ |              This method transfers one or more files specified by their paths on the host machine
+ |              to a designated folder on the Android device.
+ |
+ |              Parameters
+ |              ----------
+ |              all_paths : list of str
+ |                  A list of file paths on the host that should be pushed to the device.
+ |              folder_on_device : str
+ |                  The destination folder on the device where the files will be placed.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that executes the file push operation.
+ |
+ |              Notes
+ |              -----
+ |              This method leverages the adb push command to transfer files, ensuring that each file
+ |              is copied to the target folder on the device.
+ |
+ |  push_files_to_folder_and_rescan_media(self, all_paths, folder_on_device)
+ |              Push multiple files to a folder on the device and trigger a media rescan.
+ |
+ |              This method not only transfers files from the host to a specified folder on the device,
+ |              but it also triggers the device's media scanner to update its database, ensuring that
+ |              the newly pushed files are recognized by the system.
+ |
+ |              Parameters
+ |              ----------
+ |              all_paths : list of str
+ |                  A list of file paths on the host that should be transferred.
+ |              folder_on_device : str
+ |                  The destination folder on the device where the files will be stored.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that performs the push and media rescan.
+ |
+ |              Notes
+ |              -----
+ |              The command executed is equivalent to:
+ |                  adb push <file> <folder_on_device> && [command to trigger media scan]
+ |              This is particularly useful for media files, ensuring they appear in galleries or media players.
+ |
+ |  push_script_and_start_in_background(self, script)
+ |              Push a script to the device and execute it in the background.
+ |
+ |              The script is first pushed to the device's /sdcard/ directory and then executed
+ |              via a shell command. This method facilitates background execution of custom scripts.
+ |
+ |              Parameters
+ |              ----------
+ |              script : str
+ |                  The content of the script to be pushed and executed.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that starts the script.
+ |
+ |  reconnect_offline_devices(self)
+ |              Reconnect any devices that are currently offline.
+ |
+ |              This method attempts to re-establish connections to any devices that have been
+ |              detected as offline by ADB, thereby restoring communication with those devices.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that attempts to reconnect offline devices.
+ |
+ |              Notes
+ |              -----
+ |              The command used internally is analogous to:
+ |                  adb reconnect offline
+ |              This can be useful in environments where devices frequently lose connection.
+ |
+ |  restart_as_tcp_5037(self)
+ |              Restart the ADB server in TCP mode on port 5037.
+ |
+ |              This method restarts the ADB server so that it listens for connections over TCP
+ |              on port 5037. This is useful for network-based debugging or when USB connectivity
+ |              is not feasible.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that restarts the ADB server in TCP mode.
+ |
+ |              Notes
+ |              -----
+ |              Internally, this method executes a command similar to:
+ |                  adb tcpip 5037
+ |              allowing remote connections to the device.
+ |
+ |  restart_as_usb(self)
+ |              Restart the ADB server to use USB mode.
+ |
+ |              This method reverts the ADB server back to USB mode after it has been started in
+ |              TCP mode. It ensures that the device is again connected over USB.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that restarts the ADB server for USB connectivity.
+ |
+ |              Notes
+ |              -----
+ |              The underlying command executed is similar to:
+ |                  adb usb
+ |              which switches the server back to its default USB connection mode.
+ |
+ |  reverse_tcp_port(self, port_pc, port_device)
+ |              Set up reverse TCP port forwarding from the host to the device.
+ |
+ |              Parameters
+ |              ----------
+ |              port_pc : int
+ |                  The TCP port number on the host (PC).
+ |              port_device : int
+ |                  The TCP port number on the device.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that sets up reverse TCP forwarding.
+ |
+ |  start_constant_connect(self)
+ |              Start a constant ADB connection process on Windows.
+ |
+ |              This method initiates a continuous connection process for ADB on Windows platforms.
+ |              It first ensures that the adb_connect executable is available by downloading and compiling
+ |              it if necessary, and then starts a main process to maintain a persistent connection.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result of the subprocess call that starts the constant connection process.
+ |
+ |              Raises
+ |              ------
+ |              NotImplementedError
+ |                  If the method is called on a non-Windows system.
+ |
+ |              Notes
+ |              -----
+ |              This method is only supported on Windows. The internal steps include:
+ |              1. Checking platform compatibility.
+ |              2. Downloading and compiling the adb_connect executable if it does not exist.
+ |              3. Starting the connection process using mainprocess with the proper executable path.
+ |
+ |  start_server(self)
+ |              Start the ADB server.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that starts the ADB server.
+ |
+ |  start_server_without_log(self, trunc_each_seconds=60)
+ |              Start the ADB server without logging excessive output.
+ |
+ |              The server is started while simultaneously truncating log output at the specified
+ |              interval to prevent large log files.
+ |
+ |              Parameters
+ |              ----------
+ |              trunc_each_seconds : int, optional
+ |                  The interval (in seconds) at which the log is truncated (default is 60).
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that starts the ADB server.
+ |
+ |  uninstall_apk(self, package_name)
+ |              Uninstall an APK from the device.
+ |
+ |              Parameters
+ |              ----------
+ |              package_name : str
+ |                  The package name of the APK to uninstall.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that uninstalls the APK.
+ |
+ |  uninstall_apk_keep_data(self, package_name)
+ |              Uninstall an APK from the device while preserving its data.
+ |
+ |              Parameters
+ |              ----------
+ |              package_name : str
+ |                  The package name of the APK to uninstall.
+ |
+ |              Returns
+ |              -------
+ |              subprocess.CompletedProcess
+ |                  The result from the subprocess call that uninstalls the APK while keeping data.
+ |
+```
 
 
 
@@ -942,9 +1368,9 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## More tutorials
 
-[![Video](https://img.youtube.com/vi/Abo_kqAmRbM/0.jpg)](https://www.youtube.com/watch?v=Abo_kqAmRbM) 
+[![Video](https://img.youtube.com/vi/Abo_kqAmRbM/0.jpg)](https://www.youtube.com/watch?v=Abo_kqAmRbM)
 
-[![Video](https://img.youtube.com/vi/J9MEvutzH0g/0.jpg)](https://www.youtube.com/watch?v=J9MEvutzH0g) 
+[![Video](https://img.youtube.com/vi/J9MEvutzH0g/0.jpg)](https://www.youtube.com/watch?v=J9MEvutzH0g)
 
 ## Contact
 

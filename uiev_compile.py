@@ -121,7 +121,7 @@ compiler_directives = {
     "always_allow_keywords": True,
     "c_api_binop_methods": False,
     "profile": False,
-    "linetrace": False,
+    "linetrace": True,
     "infer_types": True,
     "language_level": 3,  # (2/3/3str)
     "c_string_type": "bytes",  # (bytes / str / unicode)

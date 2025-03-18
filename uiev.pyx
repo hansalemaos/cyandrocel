@@ -54,7 +54,7 @@ import warnings
 import zipfile
 import traceback
 from pandas import DataFrame as pd_DataFrame
-
+from threading import Timer
 
 re.cache_all(True)
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -71,6 +71,7 @@ ctypedef struct color_rgb_with_coords_and_count:
 ctypedef vector[color_rgb_with_coords_and_count] vec_rgbxycount
 
 cdef:
+    object opened_adb_log
     dict[str,bytes] latin_keycombination = {
 
         # ascii
@@ -429,6 +430,9 @@ cdef:
     object ntdll=None
     object kernel32=None
     object _GetShortPathNameW=None
+    str adb_connect_exe="adbconnect.exe" if iswindows else "adbconnect_exe"
+    str adb_connect_exe_full = os.path.join(this_folder, adb_connect_exe)
+    object regex_dev = re.compile(rb"(^.*?)\s{2,}device\s+(.*?)$")
 
 if iswindows:
     from ctypes import wintypes
@@ -447,6 +451,7 @@ if iswindows:
     _GetShortPathNameW = kernel32.GetShortPathNameW
     _GetShortPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
     _GetShortPathNameW.restype = wintypes.DWORD
+
 
 
 class JustColors:
@@ -9420,6 +9425,7 @@ class CyAndroCel:
             device_id=self.device_id,
             kwargs=self.kwargs
         )
+        self.Adb = Adb(exefile=self.adb_exe, device_id=self.device_id, kwargs=self.kwargs)
 
 
     @staticmethod
@@ -9815,6 +9821,1065 @@ class CyAndroCel:
             system_bin=self.system_bin_path,
         )
 
+########################################################
+
+cpdef trunc_function(int intervalo):
+    cdef:
+        object t
+    try:
+        opened_adb_log.truncate()
+        opened_adb_log.flush()
+    except Exception:
+        pass
+    t = Timer(
+        intervalo,
+        trunc_function,
+        kwargs={"intervalo": intervalo},
+    )
+    t.start()
+
+
+cpdef _push_files_and_rescan_media(
+    str adb_exe, str device_id, list[str] all_paths, str folder_on_device, bint rescan_media, dict kwargs
+):
+    cdef:
+        list[str] all_path = [os.path.normpath(x) for x in all_paths if os.path.exists(x)]
+        str common_path = os.path.normpath(os.path.commonpath(all_path))
+        int len_common_path = len(common_path)
+        list[str] all_relpath = [x[len_common_path:].strip("\\/") for x in all_path]
+        list[str] all_path_on_device, folders_to_create, cmd_folders_to_create, cmd_push, media_scan_cmd
+        list executed_cmds
+        str cmd
+    all_path_on_device = [
+        os.path.join(folder_on_device, x).replace("\\", "/") for x in all_relpath
+    ]
+    folders_to_create = sorted(
+        {"/".join((q := x.split("/"))[: len(q) - 1]) for x in all_path_on_device},
+        key=len,
+        reverse=True,
+    )
+    cmd_folders_to_create = [
+        [adb_exe, "-s", device_id, "shell", f"mkdir -p {x}"] for x in folders_to_create
+    ]
+    cmd_push = [
+        [adb_exe, "-s", device_id, "push", x, y]
+        for x, y in zip(all_path, all_path_on_device)
+    ]
+    if rescan_media:
+        media_scan_cmd = [
+            [
+                adb_exe,
+                "-s",
+                device_id,
+                "shell",
+                f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://{x}"',
+            ]
+            for x in all_path_on_device
+        ]
+    else:
+        media_scan_cmd = []
+    executed_cmds = []
+    for cmd in cmd_folders_to_create:
+        executed_cmds.append(
+            subprocess_run(
+                cmd,
+                **{
+                    **invisibledict,
+                    "env": os_environ,
+                    **kwargs,
+                },
+            )
+        )
+    for cmd in cmd_push:
+        executed_cmds.append(
+            subprocess_run(
+                cmd,
+                **{
+                    **invisibledict,
+                    "env": os_environ,
+                    **kwargs,
+                },
+            )
+        )
+    if media_scan_cmd:
+        for cmd in media_scan_cmd:
+            executed_cmds.append(
+                subprocess_run(
+                    cmd,
+                    **{
+                        **invisibledict,
+                        "env": os_environ,
+                        **kwargs,
+                    },
+                )
+            )
+    return executed_cmds
+
+
+cpdef adb_push_files_and_rescan_media(
+    str adb_exe, str device_id, list[str] all_paths, str folder_on_device, dict kwargs
+):
+    return _push_files_and_rescan_media(
+        adb_exe=adb_exe,
+        device_id=device_id,
+        all_paths=all_paths,
+        folder_on_device=folder_on_device,
+        rescan_media=True,
+        kwargs=kwargs,
+    )
+
+
+cpdef adb_push_files(str adb_exe, str device_id, list[str] all_paths, str folder_on_device, dict kwargs):
+    return _push_files_and_rescan_media(
+        adb_exe=adb_exe,
+        device_id=device_id,
+        all_paths=all_paths,
+        folder_on_device=folder_on_device,
+        rescan_media=False,
+        kwargs=kwargs,
+    )
+
+
+cpdef adb_pull_folder(str adb_exe, str device_id, str folder_on_device, str dst, dict kwargs):
+    os.makedirs(dst, exist_ok=True)
+    old_dir = os.getcwd()
+    os.chdir(dst)
+    try:
+        return subprocess_run(
+            [adb_exe, "-s", device_id, "pull", folder_on_device],
+            **{
+                **invisibledict,
+                "env": os_environ,
+                **kwargs,
+            },
+        )
+    finally:
+        os.chdir(old_dir)
+
+
+def mainprocess(exefile, args_command, **kwargs):
+    if iswindows:
+        wholecommand = f'start /min "" {exefile} "{args_command}"'
+    else:
+        raise NotImplementedError("Only Windows is supported")
+    print(f"Executing: {wholecommand}")
+    p = subprocess.Popen(
+        wholecommand,
+        cwd=os.path.dirname(__file__),
+        env=os.environ,
+        shell=True,
+        **invisibledict,
+        **kwargs,
+    )
+    return p
+
+
+cpdef download_and_compile_adb_connect():
+    cdef:
+        list[str] adb_connect_source_files = [
+        "https://github.com/hansalemaos/adb_auto_connect/raw/refs/heads/main/adbconnect.cpp",
+        "https://github.com/hansalemaos/adb_auto_connect/raw/refs/heads/main/argparser.hpp",
+        "https://github.com/hansalemaos/adb_auto_connect/raw/refs/heads/main/ctre.hpp",
+    ]
+        str cpp_file_pure = os.path.join(this_folder, "adbconnect.cpp")
+    if not os.path.exists(adb_connect_exe_full):
+        for url in adb_connect_source_files:
+            with requests.get(url) as r:
+                if r.status_code == 200:
+                    downloadfile = os.path.join(
+                        this_folder, url.rsplit("/", maxsplit=1)[1]
+                    )
+                    with open(downloadfile, "wb") as f:
+                        f.write(r.content)
+                else:
+                    raise ValueError(f"Failed to download {url}")
+        compile_any_parser(cpp_file_pure, adb_connect_exe, adb_connect_exe_full)
+
+
+cpdef adb_connect(str exefile, str device_id, dict kwargs):
+    return subprocess_run(
+        [exefile, "connect", device_id],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_usb(str exefile, dict kwargs):
+    return subprocess_run(
+        [exefile, "usb"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_tcpip(str exefile, dict kwargs):
+    return subprocess_run(
+        [exefile, "tcpip", "5037"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_devices(str exefile, dict kwargs):
+    return subprocess_run(
+        [exefile, "devices", "-l"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_reconnect_offline(str exefile, dict kwargs):
+    return subprocess_run(
+        [exefile, "reconnect", "offline"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_install(str exefile, str device_id, str path, dict kwargs):
+    return subprocess_run(
+        [exefile, "-s", device_id, "install", "-g", get_short_path_name(path)],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_install_overwrite(str exefile, str device_id, str path, dict kwargs):
+    return subprocess_run(
+        [exefile, "-s", device_id, "install", "-g", "-r", get_short_path_name(path)],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_install_test(str exefile, str device_id, str path, dict kwargs):
+    return subprocess_run(
+        [exefile, "-s", device_id, "install", "-g", "-t", get_short_path_name(path)],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_uninstall(str exefile, str device_id, str package_name, dict kwargs):
+    return subprocess_run(
+        [exefile, "-s", device_id, "uninstall", package_name],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_uninstall_keep_data(str exefile, str device_id, str package_name, dict kwargs):
+    return subprocess_run(
+        [exefile, "-s", device_id, "uninstall", "-k", package_name],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+def adb_get_all_devices(str exefile, dict kwargs):
+    return dict(
+        y[0]
+        for y in [
+            regex_dev.findall(line)
+            for line in subprocess_run(
+                [exefile, "devices", "-l"],
+                **{
+                    **invisibledict,
+                    "env": os_environ,
+                    **kwargs,
+                    "capture_output": True,
+                },
+            ).stdout.splitlines()
+        ]
+        if y
+    )
+
+
+cpdef adb_pair(str exefile, str device_id, str code, dict kwargs):
+    return subprocess_run(
+        [exefile, "pair", device_id, code],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_kill_server(str exefile, dict kwargs):
+    return subprocess_run(
+        [exefile, "kill-server"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_start_server(str exefile, dict kwargs):
+    return subprocess_run(
+        [exefile, "start-server"],
+        **{**invisibledict, "env": os_environ, **kwargs},
+    )
+
+
+cpdef adb_start_server_without_log(str exefile, int truncate_each_s, dict kwargs):
+    global opened_adb_log
+    os.environ["ADB_TRACE"] = ""
+    os.environ["ANDROID_VERBOSE"] = ""
+    if iswindows:
+        adb_tmp_file = os.path.join(
+            os.environ.get("TEMP", os.environ.get("TMP")), "adb.log"
+        )
+    else:
+        adb_tmp_file = f"/tmp/adb.{os.getuid()}.log"
+
+    while os.path.exists(adb_tmp_file):
+        try:
+            adb_kill_server(exefile, kwargs)
+            if iswindows:
+                subprocess_run(
+                    ["taskkill", "/F", "/IM", "adb.exe"],
+                    **{"env": os_environ, **invisibledict, **kwargs},
+                )
+            else:
+                subprocess_run(
+                    ["pkill", "adb"],
+                    **{"env": os_environ, **invisibledict, **kwargs, "shell": True},
+                )
+            os.remove(adb_tmp_file)
+        except Exception as e:
+            print(e)
+    opened_adb_log = open(
+        adb_tmp_file,
+        mode="wb",
+        buffering=0,
+    )
+    timesleep(1)
+    trunc_function(intervalo=truncate_each_s)
+    return subprocess_run(
+        [exefile, "start-server"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_forward_tcp(str exefile, str device_id, int port_pc, int port_device, dict kwargs):
+    return subprocess_run(
+        [exefile, "-s", device_id, "forward", f"tcp:{port_pc}", f"tcp:{port_device}"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_get_forward_list(str exefile, dict kwargs):
+    return [
+        h
+        for h in [
+            y.split(maxsplit=2)
+            for y in (
+                subprocess_run(
+                    [exefile, "forward", "--list"],
+                    **{
+                        **invisibledict,
+                        "env": os_environ,
+                        **kwargs,
+                        "capture_output": True,
+                    },
+                )
+                .stdout.strip()
+                .decode("utf-8", "ignore")
+            ).splitlines()
+        ]
+        if len(h) == 3
+    ]
+
+
+cpdef adb_reverse_tcp(str exefile, str device_id, int port_pc, int port_device, dict kwargs):
+    return subprocess_run(
+        [exefile, "-s", device_id, "reverse", f"tcp:{port_pc}", f"tcp:{port_device}"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+
+
+cpdef adb_get_reverse_list(str exefile, dict kwargs):
+    return [
+        h
+        for h in [
+            y.split(maxsplit=2)
+            for y in (
+                subprocess_run(
+                    [exefile, "reverse", "--list"],
+                    **{
+                        **invisibledict,
+                        "env": os_environ,
+                        **kwargs,
+                        "capture_output": True,
+                    },
+                )
+                .stdout.strip()
+                .decode("utf-8", "ignore")
+            ).splitlines()
+        ]
+        if len(h) == 3
+    ]
+
+
+cpdef adb_push_script_start_background(str exefile, str device_id, str script_file, dict kwargs):
+    cdef:
+        str tmpfile = get_tmpfile(suffix=".sh")
+    with open(tmpfile, "w", encoding="utf-8") as f:
+        f.write(script_file)
+    subprocess_run(
+        [exefile, "-s", device_id, "push", tmpfile, "/sdcard/"],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+        },
+    )
+    subprocess_run(
+        [
+            exefile,
+            "-s",
+            device_id,
+            "shell",
+        ],
+        **{
+            **invisibledict,
+            "env": os_environ,
+            **kwargs,
+            "input": f"sh /sdcard/{os.path.basename(tmpfile)} &\n".encode("utf-8"),
+        },
+    )
+    try:
+        os.remove(tmpfile)
+    except Exception:
+        pass
+
+
+@cython.final
+cdef class Adb:
+    """
+    A class to encapsulate Android Debug Bridge (ADB) functionalities.
+
+    This class provides methods for interacting with Android devices via ADB commands.
+    It supports operations such as pushing scripts to the device, setting up TCP port
+    forwarding/reversal, starting or killing the ADB server, pairing devices, retrieving
+    connected devices, and uninstalling APKs.
+
+    Attributes
+    ----------
+    exefile : str
+        The path to the ADB executable (processed by get_short_path_name for compatibility).
+    device_id : str
+        The unique identifier of the target Android device.
+    kwargs : dict
+        Additional keyword arguments to pass to subprocess calls.
+    """
+    cdef:
+        str exefile
+        str device_id
+        dict kwargs
+
+    def __init__(self, str exefile, str device_id, object kwargs):
+        """
+        Initialize an Adb instance.
+
+        Parameters
+        ----------
+        exefile : str
+            The path to the ADB executable.
+        device_id : str
+            The unique identifier of the target Android device.
+        kwargs : object
+            Additional keyword arguments to be used in subprocess calls.
+        """
+        self.exefile = get_short_path_name(exefile)
+        self.device_id = device_id
+        self.kwargs = kwargs if kwargs else {}
+
+    def push_script_and_start_in_background(self, str script):
+        """
+        Push a script to the device and execute it in the background.
+
+        The script is first pushed to the device's /sdcard/ directory and then executed
+        via a shell command. This method facilitates background execution of custom scripts.
+
+        Parameters
+        ----------
+        script : str
+            The content of the script to be pushed and executed.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that starts the script.
+        """
+        return adb_push_script_start_background(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            script_file=script,
+            kwargs=self.kwargs,
+        )
+
+    def get_reversed_ports(self):
+        """
+        Retrieve a list of reversed TCP ports on the device.
+
+        This method returns the list of port mappings that have been set up for reverse TCP
+        forwarding on the device.
+
+        Returns
+        -------
+        list
+            A list of reversed TCP port mappings.
+        """
+        return adb_get_reverse_list(exefile=self.exefile, kwargs=self.kwargs)
+
+    def reverse_tcp_port(self, int port_pc, int port_device):
+        """
+        Set up reverse TCP port forwarding from the host to the device.
+
+        Parameters
+        ----------
+        port_pc : int
+            The TCP port number on the host (PC).
+        port_device : int
+            The TCP port number on the device.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that sets up reverse TCP forwarding.
+        """
+        return adb_reverse_tcp(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            port_pc=port_pc,
+            port_device=port_device,
+            kwargs=self.kwargs,
+        )
+
+    def get_forwarded_ports(self):
+        """
+        Retrieve a list of forwarded TCP ports on the device.
+
+        This method returns the list of port mappings that have been set up for TCP forwarding
+        from the device to the host.
+
+        Returns
+        -------
+        list
+            A list of forwarded TCP port mappings.
+        """
+        return adb_get_forward_list(exefile=self.exefile, kwargs=self.kwargs)
+
+    def forward_tcp_port(self, int port_pc, int port_device):
+        """
+        Set up forward TCP port forwarding from the device to the host.
+
+        Parameters
+        ----------
+        port_pc : int
+            The TCP port number on the host (PC).
+        port_device : int
+            The TCP port number on the device.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that sets up forward TCP forwarding.
+        """
+        return adb_forward_tcp(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            port_pc=port_pc,
+            port_device=port_device,
+            kwargs=self.kwargs,
+        )
+
+    def start_server_without_log(self, int trunc_each_seconds=60):
+        """
+        Start the ADB server without logging excessive output.
+
+        The server is started while simultaneously truncating log output at the specified
+        interval to prevent large log files.
+
+        Parameters
+        ----------
+        trunc_each_seconds : int, optional
+            The interval (in seconds) at which the log is truncated (default is 60).
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that starts the ADB server.
+        """
+        return adb_start_server_without_log(
+            exefile=self.exefile, truncate_each_s=trunc_each_seconds, kwargs=self.kwargs
+        )
+
+    def start_server(self):
+        """
+        Start the ADB server.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that starts the ADB server.
+        """
+        return adb_start_server(exefile=self.exefile, kwargs=self.kwargs)
+
+    def kill_server(self):
+        """
+        Kill the ADB server.
+
+        This method stops the running ADB server.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that kills the ADB server.
+        """
+        return adb_kill_server(exefile=self.exefile, kwargs=self.kwargs)
+
+    def pair(self, str code):
+        """
+        Pair the device using a provided pairing code.
+
+        Parameters
+        ----------
+        code : str
+            The pairing code used to pair the device.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that pairs the device.
+        """
+        return adb_pair(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            code=code,
+            kwargs=self.kwargs,
+        )
+
+    def get_all_devices(self):
+        """
+        Retrieve a dictionary of all connected devices.
+
+        This method returns a dictionary of devices detected by ADB.
+
+        Returns
+        -------
+        dict
+            A dictionary mapping device identifiers to their details.
+        """
+        return adb_get_all_devices(exefile=self.exefile, kwargs=self.kwargs)
+
+    def uninstall_apk_keep_data(self, str package_name):
+        """
+        Uninstall an APK from the device while preserving its data.
+
+        Parameters
+        ----------
+        package_name : str
+            The package name of the APK to uninstall.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that uninstalls the APK while keeping data.
+        """
+        return adb_uninstall_keep_data(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            package_name=package_name,
+            kwargs=self.kwargs,
+        )
+
+    def uninstall_apk(self, str package_name):
+        """
+        Uninstall an APK from the device.
+
+        Parameters
+        ----------
+        package_name : str
+            The package name of the APK to uninstall.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result from the subprocess call that uninstalls the APK.
+        """
+        return adb_uninstall(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            package_name=package_name,
+            kwargs=self.kwargs,
+        )
+
+    def install_apk_as_test(self, str path):
+        """
+        Install an APK on the device in test mode.
+
+        This method installs an APK using ADB with the test (-t) flag and grants all runtime
+        permissions (-g). The provided APK path is processed by get_short_path_name to ensure
+        compatibility with the operating system (especially on Windows).
+
+        Parameters
+        ----------
+        path : str
+            The full path to the APK file that should be installed on the device.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call which performs the installation. This object
+            contains the output and return code from the adb install command.
+
+        Notes
+        -----
+        The underlying command executed is equivalent to:
+            adb -s <device_id> install -g -t <shortened_path>
+        where:
+        - The "-g" flag automatically grants all runtime permissions.
+        - The "-t" flag allows installation of test packages.
+        - <shortened_path> is obtained by applying get_short_path_name to the provided path.
+        """
+        return adb_install_test(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            path=path,
+            kwargs=self.kwargs,
+        )
+
+    def install_apk_overwrite(self, str path):
+        """
+        Install an APK on the device, overwriting any existing installation.
+
+        This method installs an APK by forcing an overwrite (typically using the '-r'
+        flag) so that any previously installed version of the application is replaced.
+
+        Parameters
+        ----------
+        path : str
+            The full path to the APK file that should be installed.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call executing the ADB command for installation.
+
+        Notes
+        -----
+        The underlying command is equivalent to:
+            adb -s <device_id> install -r <processed_path>
+        where <processed_path> is obtained via get_short_path_name for compatibility.
+
+        """
+        return adb_install_overwrite(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            path=path,
+            kwargs=self.kwargs,
+        )
+
+    def install_apk(self, str path):
+        """
+        Install an APK on the device without forcing an overwrite.
+
+        This method installs an APK using the standard ADB installation command without
+        additional overwrite flags. It assumes the app is not already installed, or that
+        its presence does not interfere with the installation.
+
+        Parameters
+        ----------
+        path : str
+            The full path to the APK file to be installed.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call executing the ADB installation command.
+
+        Notes
+        -----
+        The underlying command executed is equivalent to:
+            adb -s <device_id> install <processed_path>
+        where <processed_path> is derived from the provided path.
+
+        """
+        return adb_install(
+            exefile=self.exefile,
+            device_id=self.device_id,
+            path=path,
+            kwargs=self.kwargs,
+        )
+
+    def reconnect_offline_devices(self):
+        """
+        Reconnect any devices that are currently offline.
+
+        This method attempts to re-establish connections to any devices that have been
+        detected as offline by ADB, thereby restoring communication with those devices.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that attempts to reconnect offline devices.
+
+        Notes
+        -----
+        The command used internally is analogous to:
+            adb reconnect offline
+        This can be useful in environments where devices frequently lose connection.
+
+        """
+        return adb_reconnect_offline(exefile=self.exefile, kwargs=self.kwargs)
+
+    def restart_as_tcp_5037(self):
+        """
+        Restart the ADB server in TCP mode on port 5037.
+
+        This method restarts the ADB server so that it listens for connections over TCP
+        on port 5037. This is useful for network-based debugging or when USB connectivity
+        is not feasible.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that restarts the ADB server in TCP mode.
+
+        Notes
+        -----
+        Internally, this method executes a command similar to:
+            adb tcpip 5037
+        allowing remote connections to the device.
+
+        """
+        return adb_tcpip(exefile=self.exefile, kwargs=self.kwargs)
+
+    def restart_as_usb(self):
+        """
+        Restart the ADB server to use USB mode.
+
+        This method reverts the ADB server back to USB mode after it has been started in
+        TCP mode. It ensures that the device is again connected over USB.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that restarts the ADB server for USB connectivity.
+
+        Notes
+        -----
+        The underlying command executed is similar to:
+            adb usb
+        which switches the server back to its default USB connection mode.
+
+        """
+        return adb_usb(exefile=self.exefile, kwargs=self.kwargs)
+
+    def connect(self):
+        """
+        Establish a network connection to the device via ADB.
+
+        This method initiates a connection to the device over the network using ADB. It is
+        typically used after the ADB server has been restarted in TCP mode.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that connects to the specified device.
+
+        Notes
+        -----
+        The command executed is equivalent to:
+            adb connect <device_id>
+        ensuring that the device is accessible over the network.
+
+        """
+        return adb_connect(
+            exefile=self.exefile, device_id=self.device_id, kwargs=self.kwargs
+        )
+
+    def pull_folder(self, str src, str dst):
+        """
+        Pull a folder from the device to the host machine.
+
+        This method downloads the contents of a folder from the Android device to a specified
+        destination on the host machine.
+
+        Parameters
+        ----------
+        src : str
+            The source folder path on the device.
+        dst : str
+            The destination folder path on the host.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that performs the folder pull operation.
+
+        Notes
+        -----
+        The internal command is analogous to:
+            adb -s <device_id> pull <src> <dst>
+        ensuring that the folder and its contents are transferred to the host.
+
+        """
+        return adb_pull_folder(
+            adb_exe=self.exefile,
+            device_id=self.device_id,
+            folder_on_device=src,
+            dst=dst,
+            kwargs=self.kwargs,
+        )
+
+    def push_files_to_folder(self, list[str] all_paths, str folder_on_device):
+        """
+        Push multiple files from the host to a folder on the device.
+
+        This method transfers one or more files specified by their paths on the host machine
+        to a designated folder on the Android device.
+
+        Parameters
+        ----------
+        all_paths : list of str
+            A list of file paths on the host that should be pushed to the device.
+        folder_on_device : str
+            The destination folder on the device where the files will be placed.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that executes the file push operation.
+
+        Notes
+        -----
+        This method leverages the adb push command to transfer files, ensuring that each file
+        is copied to the target folder on the device.
+
+        """
+        return adb_push_files(
+            adb_exe=self.exefile,
+            device_id=self.device_id,
+            all_paths=all_paths,
+            folder_on_device=folder_on_device,
+            kwargs=self.kwargs,
+        )
+
+    def push_files_to_folder_and_rescan_media(self, list[str] all_paths, str folder_on_device):
+        """
+        Push multiple files to a folder on the device and trigger a media rescan.
+
+        This method not only transfers files from the host to a specified folder on the device,
+        but it also triggers the device's media scanner to update its database, ensuring that
+        the newly pushed files are recognized by the system.
+
+        Parameters
+        ----------
+        all_paths : list of str
+            A list of file paths on the host that should be transferred.
+        folder_on_device : str
+            The destination folder on the device where the files will be stored.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that performs the push and media rescan.
+
+        Notes
+        -----
+        The command executed is equivalent to:
+            adb push <file> <folder_on_device> && [command to trigger media scan]
+        This is particularly useful for media files, ensuring they appear in galleries or media players.
+
+        """
+        return adb_push_files_and_rescan_media(
+            adb_exe=self.exefile,
+            device_id=self.device_id,
+            all_paths=all_paths,
+            folder_on_device=folder_on_device,
+            kwargs=self.kwargs,
+        )
+
+    def start_constant_connect(self):
+        """
+        Start a constant ADB connection process on Windows.
+
+        This method initiates a continuous connection process for ADB on Windows platforms.
+        It first ensures that the adb_connect executable is available by downloading and compiling
+        it if necessary, and then starts a main process to maintain a persistent connection.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            The result of the subprocess call that starts the constant connection process.
+
+        Raises
+        ------
+        NotImplementedError
+            If the method is called on a non-Windows system.
+
+        Notes
+        -----
+        This method is only supported on Windows. The internal steps include:
+        1. Checking platform compatibility.
+        2. Downloading and compiling the adb_connect executable if it does not exist.
+        3. Starting the connection process using mainprocess with the proper executable path.
+
+        """
+        if not iswindows:
+            raise NotImplementedError("Only Windows is supported")
+        download_and_compile_adb_connect()
+        return mainprocess(exefile=get_short_path_name(adb_connect_exe_full), args_command=self.exefile)
+
+########################################################
 
 add_printer(True)
 download_any_parser(cpp_file=cpp_file_ui2, url=url_ui2_parser)
