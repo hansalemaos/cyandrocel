@@ -9847,9 +9847,10 @@ cpdef _push_files_and_rescan_media(
         str common_path = os.path.normpath(os.path.commonpath(all_path))
         int len_common_path = len(common_path)
         list[str] all_relpath = [x[len_common_path:].strip("\\/") for x in all_path]
-        list[str] all_path_on_device, folders_to_create, cmd_folders_to_create, cmd_push, media_scan_cmd
+        list[str] all_path_on_device, folders_to_create
         list executed_cmds
-        str cmd
+        list[str] cmd
+        list[list[str]] cmd_folders_to_create, cmd_push,media_scan_cmd
     all_path_on_device = [
         os.path.join(folder_on_device, x).replace("\\", "/") for x in all_relpath
     ]
@@ -10701,6 +10702,7 @@ cdef class Adb:
 
         """
         return adb_tcpip(exefile=self.exefile, kwargs=self.kwargs)
+
 
     def restart_as_usb(self):
         """
