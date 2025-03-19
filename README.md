@@ -908,6 +908,12 @@ get_df_lsof(self, timeout=1000000)
 
 ## Non-Adb shell API
 
+### The methods can be accessed using:
+
+```py
+cyandro.Adb.METHOD(...)
+```
+
 ```py
 class Adb
  |  Adb(unicode exefile, unicode device_id, kwargs)
