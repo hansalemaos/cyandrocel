@@ -10879,7 +10879,7 @@ cdef class Adb:
         if not iswindows:
             raise NotImplementedError("Only Windows is supported")
         download_and_compile_adb_connect()
-        return mainprocess(exefile=get_short_path_name(adb_connect_exe_full), args_command=self.exefile)
+        return mainprocess(exefile=get_short_path_name(adb_connect_exe_full), args_command=f'--adb_path={self.exefile}')
 
 ########################################################
 
