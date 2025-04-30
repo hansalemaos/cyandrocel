@@ -1382,6 +1382,40 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 [![Video](https://img.youtube.com/vi/nf7CdEYUAao/0.jpg)](https://www.youtube.com/watch?v=nf7CdEYUAao)
 
+### Web Scraping on the most protected site there is: https://bet365.com
+
+https://youtu.be[![Video](https://img.youtube.com/vi/zaIXmiRgRDQ/0.jpg)](https://www.youtube.com/watch?v=zaIXmiRgRDQ)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/gswo-9UhnRw/0.jpg)](https://www.youtube.com/watch?v=gswo-9UhnRw)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/TPMopuCqM5s/0.jpg)](https://www.youtube.com/watch?v=TPMopuCqM5s)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/6jw1US_OXp8/0.jpg)](https://www.youtube.com/watch?v=6jw1US_OXp8)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/B3febrPYBCU/0.jpg)](https://www.youtube.com/watch?v=B3febrPYBCU)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/UwzYW8Qkh6E/0.jpg)](https://www.youtube.com/watch?v=UwzYW8Qkh6E)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/gbggqeYHuzo/0.jpg)](https://www.youtube.com/watch?v=gbggqeYHuzo)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/cqWggXpYTnM/0.jpg)](https://www.youtube.com/watch?v=cqWggXpYTnM)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/y476HgwWkA4/0.jpg)](https://www.youtube.com/watch?v=y476HgwWkA4)
+
+
+https://youtu.be[![Video](https://img.youtube.com/vi/NvwuyssvJE0/0.jpg)](https://www.youtube.com/watch?v=NvwuyssvJE0)
+
+
+
+
 ## Contact
 
 If you’re interested in private classes with me to learn strategies for automating anything, or if you have an automation project (within legal boundaries!) that you’d like to bring to life, feel free to contact me. I speak German, English, and Portuguese fluently, and Spanish proficiently.
