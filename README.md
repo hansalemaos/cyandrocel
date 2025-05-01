@@ -1382,7 +1382,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 [![Video](https://img.youtube.com/vi/nf7CdEYUAao/0.jpg)](https://www.youtube.com/watch?v=nf7CdEYUAao)
 
-### Web Scraping on the most protected site there is: https://bet365.com
+### Web Scraping of the most protected site there is: https://bet365.com
 
 [![Video](https://img.youtube.com/vi/zaIXmiRgRDQ/0.jpg)](https://www.youtube.com/watch?v=zaIXmiRgRDQ)
 
