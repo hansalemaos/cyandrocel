@@ -953,6 +953,16 @@ cpdef take_screenshot(list[str] cmd, int width, int height, dict kwargs):
         errwrite()
         return np.array([],dtype=np.uint8)
 ################################################# START Pandas Printer ####################################################################
+cdef:
+    list[str] colors2rotate=[
+        LightRed,
+        LightGreen,
+        LightYellow,
+        LightBlue,
+        LightMagenta,
+        LightCyan,
+        White,
+    ]
 
 @cython.nonecheck(True)
 def pdp(
