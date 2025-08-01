@@ -44,6 +44,7 @@ import numpy as np
 import os
 import pandas as pd
 import re as repy
+from pandas.core.indexing import T
 import regex as re
 import requests
 import shutil
@@ -54,7 +55,7 @@ import warnings
 import zipfile
 import traceback
 from pandas import DataFrame as pd_DataFrame
-from threading import Timer
+from threading import Timer, Thread
 
 re.cache_all(True)
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -4211,6 +4212,14 @@ subssed "$sourcef" "$str1" "$str2"
     SH_SVC_ENABLE_WIFI = "{exe_path}svc wifi enable"
     SH_SVC_DISABLE_WIFI = "{exe_path}svc wifi disable"
     SH_TRIM_CACHES = "{exe_path}pm trim-caches 99999G"
+    SH_OPEN_APP_WITH_DISABLE_USER = r'''
+{exe_path}pm disable-user {package_name}
+{exe_path}sleep {sleep_time}
+{exe_path}pm enable {package_name}
+{exe_path}sleep {sleep_time}
+{exe_path}am start "$({exe_path}cmd package resolve-activity --brief {package_name} | {exe_path}tail -n 1)"
+'''
+
     SH_FORCE_OPEN_APP = r"""
 while true; do
   capture="$({exe_path}dumpsys window | {exe_path}grep -E 'mCurrentFocus|mFocusedApp' | {exe_path}grep -c "{package_name}")"
@@ -4636,6 +4645,14 @@ cdef class Shelly:
         CommandGetter _c
         str system_bin
         bytes system_bin_as_binary
+        bint use_py_subproc
+        bint _py_stop_stdout
+        bint _py_stop_stderr
+        object _pyp
+        object _py_thread_stdout
+        object _py_thread_stderr
+        object _py_stdout
+        object _py_stderr
 
     def __dealloc__(self):
         del self.finish_cmd_to_write
@@ -4656,6 +4673,7 @@ cdef class Shelly:
                 str su_exe="su",
                 str finish_cmd="HERE_IS_FINISH",
                 str system_bin="",
+                bint use_py_subproc=False,
                 ):
         cdef:
                 bytes self_su_exe = su_exe.encode("utf-8")
@@ -4663,40 +4681,173 @@ cdef class Shelly:
                 bytes self_finish_cmd_to_write_stderr = (
             f"""printf "\n%s\n" '{finish_cmd}' >&2""".encode()
         )
-        self.finish_cmd_to_write=new string(<string>self_finish_cmd_to_write)
-        self.finish_cmd_to_write_stderr=new string(<string>self_finish_cmd_to_write_stderr)
-        self.su_exe=new string(<string>self_su_exe)
-        self.bin_finish_cmd=new string(convert_python_object_to_cpp_string(finish_cmd))
-        self.cpp_new_line= new string(b"\n")
-        self.cpp_empty_string= new string(b"")
+        self.finish_cmd_to_write = new string(<string>self_finish_cmd_to_write)
+        self.finish_cmd_to_write_stderr = new string(<string>self_finish_cmd_to_write_stderr)
+        self.su_exe = new string(<string>self_su_exe)
+        self.bin_finish_cmd = new string(convert_python_object_to_cpp_string(finish_cmd))
+        self.cpp_new_line = new string(b"\n")
+        self.cpp_empty_string = new string(b"")
         self.system_bin=system_bin
         self.system_bin_as_binary = system_bin.encode("utf-8")
-        self.p = CySubProc(
-                shell_command=shell_command,
-                buffer_size=buffer_size,
-                stdout_max_len=stdout_max_len,
-                stderr_max_len=stderr_max_len,
-                exit_command=exit_command,
-                print_stdout=print_stdout,
-                print_stderr=print_stderr,
-                )
+        self.use_py_subproc = use_py_subproc
+        self._py_stop_stdout = False
+        self._py_stop_stderr = False
+        self._pyp=None
+        self._py_thread_stdout=None
+        self._py_thread_stderr=None
+        self._py_stdout=None
+        self._py_stderr=None
+        if not self.use_py_subproc:
+            self.p = CySubProc(
+                    shell_command=shell_command,
+                    buffer_size=buffer_size,
+                    stdout_max_len=stdout_max_len,
+                    stderr_max_len=stderr_max_len,
+                    exit_command=exit_command,
+                    print_stdout=print_stdout,
+                    print_stderr=print_stderr,
+                    )
+            self.p.start_shell()
+            self.p.stdin_write("echo STARTED")
+            self.p.stdin_write("echo STARTED >&2")
+        else:
+            self._pyp=subprocess_Popen(shell_command, **{**invisibledict, "stdin":-1, "stdout":-1, "stderr":-1, "bufsize":0})
+            self._py_thread_stdout=Thread(target=self._read_py_stdout, daemon=False)
+            self._py_thread_stderr=Thread(target=self._read_py_stderr, daemon=False)
+            self._py_stdout=[]
+            self._py_stderr=[]
+            self._py_thread_stdout.start()
+            self._py_thread_stderr.start()
         self._c = CommandGetter()
-        self.p.start_shell()
-        self.p.stdin_write("echo STARTED")
-        self.p.stdin_write("echo STARTED >&2")
         sleep_milliseconds(100)
+
+    cpdef _read_py_stderr(self):
+        if not self.use_py_subproc:
+            return
+        self._pyp.stdin.write(b"echo STARTED >&2\n")
+        self._pyp.stdin.flush()
+        try:
+            for l in iter(self._pyp.stderr.readline, b""):
+                if self._py_stop_stderr:
+                    break
+                self._py_stderr.append(l)
+        except Exception as e:
+            print(e)
+
+    cpdef _read_py_stdout(self):
+        if not self.use_py_subproc:
+            return
+        self._pyp.stdin.write(b"echo STARTED\n")
+        self._pyp.stdin.flush()
+        try:
+            for l in iter(self._pyp.stdout.readline, b""):
+                if self._py_stop_stdout:
+                    break
+                self._py_stdout.append(l)
+        except Exception as e:
+            print(e)
+
+    cpdef close_py_subproc(self):
+        if not self.use_py_subproc:
+            return
+        self._py_stop_stdout = True
+        self._py_stop_stderr = True
+        self._pyp.stdin.write(b"echo STOPPED >&2\n")
+        self._pyp.stdin.flush()
+        self._pyp.stdin.write(b"echo STOPPED\n")
+        self._pyp.stdin.flush()
+        while True:
+            try:
+                self._pyp.stdin.write(b"exit\n")
+                self._pyp.stdin.flush()
+            except Exception:
+                break
+        self._pyp.stdin.close()
+        self._pyp.stderr.close()
+        self._pyp.stdout.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self):
+        self.close_py_subproc()
+
+    cdef pair[string,string] _write_and_wait_py(self, string formatted_line, int64_t timeout=10, bint strip_results=True):
+        cdef:
+            string outstring_stdout
+            string outstring_stderr
+            size_t string_search_position=npos
+            string tmpstring
+            list[bytes] tmplist = []
+            int64_t start_time
+            int64_t end_time
+            pair[string,string] resultpair = pair[string,string](self.cpp_empty_string[0],self.cpp_empty_string[0])
+            Py_ssize_t pyline
+
+        outstring_stderr.reserve(256)
+        outstring_stdout.reserve(8192)
+        self._py_stderr.clear()
+        self._py_stdout.clear()
+        formatted_line.append(self.cpp_new_line[0])
+        formatted_line.append(self.finish_cmd_to_write[0])
+        formatted_line.append(self.cpp_new_line[0])
+        formatted_line.append(self.finish_cmd_to_write_stderr[0])
+        formatted_line.append(self.cpp_new_line[0])
+        self._pyp.stdin.write(<bytes>formatted_line)
+        self._pyp.stdin.flush()
+        sleep_milliseconds(3)
+        start_time = get_current_timestamp()
+        end_time = start_time + timeout
+        while npos==string_search_position and get_current_timestamp() < end_time:
+            tmplist.clear()
+            for pyline in range(len(self._py_stderr)):
+                tmplist.append(self._py_stderr.pop(0))
+            tmpstring=<string>(b''.join(tmplist))
+            if tmpstring.empty():
+                timesleep(0.003)
+                continue
+            outstring_stderr.append(tmpstring)
+            string_search_position=outstring_stderr.find(self.bin_finish_cmd[0])
+            timesleep(0.001)
+        start_time = get_current_timestamp()
+        end_time = start_time + timeout
+        if (npos!=string_search_position):
+            outstring_stderr.erase(outstring_stderr.begin()+string_search_position,outstring_stderr.end())
+        string_search_position=npos
+        while npos==string_search_position and get_current_timestamp() < end_time:
+            tmplist.clear()
+            for pyline in range(len(self._py_stdout)):
+                tmplist.append(self._py_stdout.pop(0))
+            tmpstring=<string>(b''.join(tmplist))
+            if tmpstring.empty():
+                timesleep(0.003)
+                continue
+            outstring_stdout.append(tmpstring)
+            string_search_position=outstring_stdout.find(self.bin_finish_cmd[0])
+            timesleep(0.001)
+        if (npos!=string_search_position):
+            outstring_stdout.erase(outstring_stdout.begin()+string_search_position,outstring_stdout.end())
+        resultpair.first=outstring_stdout
+        resultpair.second=outstring_stderr
+        if strip_results:
+            if not resultpair.first.empty():
+                strip_spaces_inplace(resultpair.first)
+            if not resultpair.second.empty():
+                strip_spaces_inplace(resultpair.second)
+        return resultpair
+
 
     cpdef pair[string,string] write_and_wait(self, object line, int64_t timeout=10, bint strip_results=True):
         cdef:
             string formatted_line = convert_python_object_to_cpp_string(line)
-            pair[string,string] result =self._write_and_wait(formatted_line=formatted_line, timeout=timeout, strip_results=strip_results)
+            pair[string,string] result = self._write_and_wait(formatted_line=formatted_line, timeout=timeout, strip_results=strip_results) if not self.use_py_subproc else self._write_and_wait_py(formatted_line=formatted_line, timeout=timeout, strip_results=strip_results)
 
         return result
 
     cpdef pair[vector[string],vector[string]] write_and_wait_list(self, object line, int64_t timeout=10, bint strip_results=True):
         cdef:
             string formatted_line = convert_python_object_to_cpp_string(line)
-            pair[string,string] result =self._write_and_wait(formatted_line=formatted_line, timeout=timeout, strip_results=strip_results)
+            pair[string,string] result =self._write_and_wait(formatted_line=formatted_line, timeout=timeout, strip_results=strip_results) if not self.use_py_subproc else self._write_and_wait_py(formatted_line=formatted_line, timeout=timeout, strip_results=strip_results)
             pair[vector[string],vector[string]] resultpair=pair[vector[string],vector[string]]([],[])
         if not result.first.empty():
             resultpair.first=split_string(result.first,self.cpp_new_line[0])
@@ -4937,7 +5088,7 @@ cdef class Shelly:
             list ss
             Py_ssize_t s_index
         so_se_pair = self.write_and_wait_list(
-            f'for q in $({self.system_bin}seq {start} {end}); do {self.system_bin}id "$q";done'
+            f'for q in $({self.system_bin}seq {start} {end}); do {self.system_bin}id "$q";done', timeout=timeout
         )
         for s_index in range(so_se_pair.first.size()):
             ss = bytes(so_se_pair.first[s_index]).decode("utf-8", "backslashreplace").split()
@@ -4959,7 +5110,7 @@ cdef class Shelly:
             Py_ssize_t s_index
             dict usergroupdict = {}
         so_se_pair = self.write_and_wait_list(
-            f'for q in $({self.system_bin}seq {start} {end}); do u="$({self.system_bin}groups "$q")" && echo "$u||||$q" ;done'
+            f'for q in $({self.system_bin}seq {start} {end}); do u="$({self.system_bin}groups "$q")" && echo "$u||||$q" ;done', timeout=timeout
         )
 
         for s_index in range(so_se_pair.first.size()):
@@ -5048,7 +5199,15 @@ cdef class Shelly:
             ),
             timeout=timeout,
         )
-
+    cpdef sh_force_open_app_with_disable(self, package_name, sleep_time, timeout=3):
+        return self.write_and_wait(
+            self._c.SH_OPEN_APP_WITH_DISABLE_USER.format(
+                exe_path=self.system_bin,
+                package_name=package_name,
+                sleep_time=sleep_time,
+            ),
+            timeout=timeout,
+        )
     cpdef sh_force_open_app(self, package_name, sleep_time, timeout=3):
         return self.write_and_wait(
             self._c.SH_FORCE_OPEN_APP.format(
@@ -5171,7 +5330,11 @@ cdef class Shelly:
         ).first
 
     cpdef su(self):
-        self.p.subproc.stdin_write(self.su_exe[0])
+        if not self.use_py_subproc:
+            self.p.subproc.stdin_write(self.su_exe[0])
+        else:
+            self._pyp.stdin.write((((self.su_exe[0]).decode("utf-8")) + "\n").encode("utf-8"))
+            self._pyp.flush()
 
     cpdef sh_dumpsys_package(self, package, timeout=1000, bint convert_to_dict=True):
         cdef:
@@ -5260,7 +5423,7 @@ cdef class Shelly:
             wholedict[cmd.split()[1]] = _dumpsys_splitter_to_dict(so3.splitlines(keepends=True),convert_to_dict=convert_to_dict)
         return wholedict
 
-    cpdef sh_parse_dumpsys_to_dict(self, subcmd, timeout=100,convert_to_dict=False):
+    cpdef sh_parse_dumpsys_to_dict(self, subcmd, timeout=100, convert_to_dict=False):
         cdef:
             bytes so3
         so3=self.write_and_wait(f"{self.system_bin}dumpsys {subcmd}", timeout=timeout).first
@@ -5290,7 +5453,7 @@ cdef class Shelly:
             ).first
         ][0]
 
-    cpdef sh_get_all_information_about_all_keyboards(self, timeout=10,convert_to_dict=False):
+    cpdef sh_get_all_information_about_all_keyboards(self, timeout=10, convert_to_dict=False):
         return _dumpsys_splitter_to_dict(
             bytes(self.write_and_wait(
                 self._c.SH_GET_ALL_KEYBOARDS_INFORMATION.format(
@@ -9796,6 +9959,7 @@ class CyAndroCel:
         bytes exit_command=b"exit",
         bint print_stdout=False,
         bint print_stderr=False,
+        bint use_py_subproc=False,
     ):
         """
         Open an interactive shell on the device via ADB.
@@ -9827,6 +9991,7 @@ class CyAndroCel:
             su_exe=self.su_exe,
             finish_cmd="HERE_IS_FINISH",
             system_bin=self.system_bin_path,
+            use_py_subproc=use_py_subproc,
         )
 
 ########################################################

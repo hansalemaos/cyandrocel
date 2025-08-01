@@ -600,7 +600,16 @@ This shell is implemented **100% in C++**, runs in **nogil mode**, and offers **
 
 ### 🚀 **Starting an Interactive Shell**
 
-#### To start a shell, simply use:
+### To start a shell, simply use:
+
+#### For a C++ shell:
+
+| **Advantages ✅**                                              | **Disadvantages ❌**                                           |
+|---------------------------------------------------------------|----------------------------------------------------------------|
+| No-Gil                                                        | Segfaults if there is no ADB connection (Python crashes)                                                             |
+| Very low CPU usage                                            | —                                                              |
+| The C++ destructor closes the shell                           | —                                                              |
+| Uses C++ threads to capture stdout/stderr                     | —                                                              |
 
 ```python
 myshell = cyandro.open_shell(
@@ -608,10 +617,33 @@ myshell = cyandro.open_shell(
     exit_command=b"exit",     # The command to exit the shell, required by the C++ destructor.
                               # Executed automatically when 'myshell' goes out of scope.
     print_stdout=False,       # Prints stdout to the screen—useful for debugging purposes
-    print_stderr=False        # Prints stderr to the screen—useful for debugging purposes
+    print_stderr=False,       # Prints stderr to the screen—useful for debugging purposes
+    use_py_subproc=False      # Doesn't use Python's subprocess
 )
 
 ```
+
+#### For a Python shell:
+
+| **Advantages ✅**                                              | **Disadvantages ❌**                                           |
+|---------------------------------------------------------------|----------------------------------------------------------------|
+| Throws an exception if there is no ADB connection                                                        | Higher CPU usage                                                              |
+| —                     | Shell must be closed manually using self.close_py_subproc()                                                            |
+| —                     | —                                                              |
+| —                     | —                                                              |
+
+```python
+myshell = cyandro.open_shell(
+    buffer_size=40960,        # ignored
+    exit_command=b"exit",     # ignored
+    print_stdout=False,       # ignored
+    print_stderr=False        # ignored
+    use_py_subproc=True,      # uses Python's subprocess
+)
+# Do some stuff
+...
+# close the shell manually
+myshell.close_py_subproc()
 
 ***
 
@@ -694,6 +726,7 @@ CyAndroCel provides a wide range of shell methods to control Android devices eff
 
 
 ```py
+sh_force_open_app_with_disable(self, package_name, sleep_time, timeout=3)
 sh_save_sed_replace(self, file_path, string2replace, replacement, timeout=1000)
 sh_svc_enable_wifi(self, timeout=10)
 sh_svc_disable_wifi(self, timeout=10)
