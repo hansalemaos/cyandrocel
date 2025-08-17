@@ -476,9 +476,11 @@ df5.bb_search_for_colors([[0, 0, 0], [255, 255, 255]], result_column="black_colo
 
 ***
 
-## Color Search
+## Color Search and other image tools
 
-### If you decide to add a screenshot to your DataFrame, you can perform a very fast color search (uses fast C++ vectors and structs for the results internally).
+### Color Search
+
+#### If you decide to add a screenshot to your DataFrame, you can perform a very fast color search (uses fast C++ vectors and structs for the results internally).
 
 ```py
 
@@ -514,6 +516,94 @@ iloc | index   | white_and_black                                                
 20   | 20      | []                                                                                                                                                                                                                                                                                                           |
 21   | 21      | [{'x': 599, 'y': 1147, 'count': 1, 'r': 255, 'g': 255, 'b': 255}]                                                                                                                                                                                                                                            |
 22   | 22      | []
+
+```
+
+### count colors
+
+```py
+df.bb_count_colors(result_column="aa_color_count_all")
+
+# Counts all colors in each element and adds a new column to the DataFrame
+
+# {(36, 7, 3): 1640403, (37, 8, 4): 63475, (255, 255, 255): 44447, (38, 9, 5): 31206, (39, 10, 6): 25333, ... }
+
+```
+
+### count colors - percentage
+
+```py
+df.bb_count_colors_percentage(result_column="aa_color_count_all_percentage")
+
+# Counts all colors in each element and adds a new column to the DataFrame
+
+# {(36, 7, 3): 79.10894097222221, (37, 8, 4): 3.061101466049383, (255, 255, 255): 2.1434702932098766, ... }
+
+```
+
+
+### calculate color average
+
+```py
+df.bb_calculate_color_average(result_column="aa_average_color")
+
+# Calculate the color average of each element and adds a new column to the DataFrame
+
+# (16, 20, 46)
+
+```
+
+
+### get unique colors
+
+```py
+df.bb_get_unique_colors(result_column="aa_unique_colors")
+
+# Gets all unique colors of each element and adds a new column to the DataFrame
+
+# ((0, 0, 0), (0, 0, 1), (0, 0, 2), (0, 0, 3), ... )
+
+```
+
+
+### get twins with own index
+
+```py
+df.bb_get_twins(result_column="aa_twins_with_own_index", with_own_index=True)
+
+# Finds equal elements (index for df.loc) and adds a new column to the DataFrame
+
+# [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+```
+
+
+### get twins
+
+```py
+df.bb_get_twins(result_column="aa_twins", with_own_index=False)
+
+# Finds equal elements (index for df.loc) and adds a new column to the DataFrame
+
+# [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+```
+
+
+### template matching with scipy
+
+```py
+df.bb_match_template_scipy(result_column="aa_template_matching_result", needle=df.aa_screenshot[37])
+
+# Does a template matching
+
+# needs scikit-image and pyfftw
+
+# pip install scikit-image
+# pip install pyfftw
+
+# Match percentage, start x, start y
+# (0.2471, 1, 5)
 
 ```
 
@@ -637,7 +727,7 @@ myshell = cyandro.open_shell(
     buffer_size=40960,        # ignored
     exit_command=b"exit",     # ignored
     print_stdout=False,       # ignored
-    print_stderr=False        # ignored
+    print_stderr=False,        # ignored
     use_py_subproc=True,      # uses Python's subprocess
 )
 # Do some stuff
@@ -1378,7 +1468,7 @@ class Adb
 <!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Add template matching using https://www.fftw.org/
+- [x] Add template matching using https://www.fftw.org/
 - [ ] Add more useful commands to the interactive shell
 - [ ] Support for Accelerated [Hierarchical Density Clustering in C++](https://github.com/rohanmohapatra/hdbscan-cpp/issues/11)
 

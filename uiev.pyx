@@ -1,5 +1,7 @@
 cimport cython
 cimport numpy as np
+from cython.operator cimport dereference as deref, preincrement as inc
+
 from ast import literal_eval
 from collections import defaultdict
 from collections.abc import Iterable
@@ -8,10 +10,11 @@ from functools import lru_cache
 from functools import reduce
 from io import StringIO,BytesIO
 from itertools import takewhile
-from libc.stdint cimport int64_t,uint8_t
+from libc.stdint cimport int64_t, uint32_t,uint8_t, uint64_t
 from libc.stdio cimport fputc,fclose,fprintf,fopen,FILE
 from libcpp.string cimport string,npos
 from libcpp.unordered_map cimport unordered_map
+from libcpp.unordered_set cimport unordered_set
 from libcpp.utility cimport pair
 from libcpp.vector cimport vector
 from operator import getitem as operator_getitem
@@ -44,7 +47,6 @@ import numpy as np
 import os
 import pandas as pd
 import re as repy
-from pandas.core.indexing import T
 import regex as re
 import requests
 import shutil
@@ -56,6 +58,19 @@ import zipfile
 import traceback
 from pandas import DataFrame as pd_DataFrame
 from threading import Timer, Thread
+try:
+    import pyfftw
+    import scipy
+    from skimage.feature import match_template
+    from skimage import color
+    scipy.fft.set_backend(pyfftw.interfaces.scipy_fft)
+    pyfftw.interfaces.cache.enable()
+    template_matching_available=True
+except (ModuleNotFoundError, ImportError):
+    template_matching_available=False
+    warnings.warn("pip install scikit-image\npip install pyfftw\n\n to use template matching\n", RuntimeWarning)
+
+
 
 re.cache_all(True)
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -303,8 +318,6 @@ cdef:
         f"{LITTLE_OR_BIG}{PYTHON_STRUCT_UNPACK_SIG_DOUBLE}"
     ).unpack
 
-    object asciifunc = np.frompyfunc(ascii, 1, 1)
-    object reprfunc = np.frompyfunc(repr, 1, 1)
     str ResetAll = "\033[0m"
     str LightRed = "\033[91m"
     str LightGreen = "\033[92m"
@@ -339,7 +352,6 @@ cdef:
     str cpp_file_tesser = os.path.join(this_folder, cpp_file_pure_tesser)
     str exe_file_pure_tesser = "hocr2csv.exe"  if iswindows else "hocr2csv_exe"
     str exe_file_tesser = os.path.join(this_folder, exe_file_pure_tesser)
-
 
     dict[str,object] invisibledict = {"shell":False, "env":os_environ}
     dict cache_apply_literal_eval_to_tuple = {}
@@ -953,6 +965,7 @@ cpdef take_screenshot(list[str] cmd, int width, int height, dict kwargs):
     except Exception:
         errwrite()
         return np.array([],dtype=np.uint8)
+
 ################################################# START Pandas Printer ####################################################################
 cdef:
     list[str] colors2rotate=[
@@ -1853,7 +1866,6 @@ cdef object get_fragment_data(
     str parse_cmd,
     int timeout=30,
     object kwargs=None,
-
 ):
     cdef:
         object dff
@@ -2344,6 +2356,185 @@ cpdef write_numpy_array_to_ppm_pic(str path, uint8_t[:] flat_pic, int width, int
     return True
 
 
+cpdef Py_ssize_t _sort_int_dict(x):
+    return x[1]
+
+cpdef double _sort_float_dict(x):
+    return x[1]
+
+cdef unordered_map[uint32_t, Py_ssize_t] count_colors_in_elements_algorithm(Py_ssize_t start_x, Py_ssize_t start_y, uint32_t[:,:,:] image) noexcept nogil:
+    cdef:
+        Py_ssize_t i,j
+        unordered_map[uint32_t, Py_ssize_t] resultdict
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            resultdict[image[i][j][2] << 16 | image[i][j][1] << 8 | image[i][j][0]]+=1
+    return resultdict
+
+cpdef count_colors_in_elements(
+    object df,
+    str result_column="aa_colorcount",
+    str screenshot_column="aa_screenshot",
+    str start_x="aa_start_x",
+    str start_y="aa_start_y",
+    str end_x="aa_end_x",
+    str end_y="aa_end_y",
+    ):
+    cdef:
+        list allresults = []
+        dict alreadydone = {}
+        object indextuple,item
+        object allresults_append=allresults.append
+    for _, item in df.iterrows():
+        if not np.any(item[screenshot_column]):
+            allresults_append([])
+            continue
+        indextuple = (
+            item[start_x],
+            item[start_y],
+            item[end_x],
+            item[end_y],
+        )
+        if indextuple in alreadydone:
+            allresults_append(alreadydone[indextuple])
+            continue
+        alreadydone[indextuple] = {
+            (((k >> 16) & 0xFF),((k >> 8) & 0xFF),(k & 0xFF)):v
+            for k,v in sorted(dict(count_colors_in_elements_algorithm(
+            start_x=item[start_x],
+            start_y=item[start_y],
+            image=item[screenshot_column].astype(np.uint32),
+        )).items(), key=_sort_int_dict, reverse=True)}
+        allresults_append(alreadydone[indextuple])
+    df.loc[:,result_column] = np.asarray(allresults, dtype="object")
+
+
+cpdef calculate_average_colors_in_elements(
+    object df,
+    str result_column="aa_coloraverage",
+    str screenshot_column="aa_screenshot",
+    str start_x="aa_start_x",
+    str start_y="aa_start_y",
+    str end_x="aa_end_x",
+    str end_y="aa_end_y",
+    ):
+    cdef:
+        list allresults = []
+        dict alreadydone = {}
+        object indextuple,item
+        object allresults_append=allresults.append
+    for _, item in df.iterrows():
+        if not np.any(item[screenshot_column]):
+            allresults_append([])
+            continue
+        indextuple = (
+            item[start_x],
+            item[start_y],
+            item[end_x],
+            item[end_y],
+        )
+        if indextuple in alreadydone:
+            allresults_append(alreadydone[indextuple])
+            continue
+        alreadydone[indextuple] = (int(np.mean(item[screenshot_column][...,0])), int(np.mean(item[screenshot_column][...,1])), int(np.mean(item[screenshot_column][...,2])))
+        allresults_append(alreadydone[indextuple])
+    df.loc[:,result_column] = allresults
+
+
+def get_unique_colors_in_elements(
+    object df,
+    str result_column="aa_unique_colors",
+    str screenshot_column="aa_screenshot",
+    str start_x="aa_start_x",
+    str start_y="aa_start_y",
+    str end_x="aa_end_x",
+    str end_y="aa_end_y",
+    ):
+    cdef:
+        list allresults = []
+        dict alreadydone = {}
+        object indextuple,item
+        object allresults_append=allresults.append
+    for _, item in df.iterrows():
+        if not np.any(item[screenshot_column]):
+            allresults_append([])
+            continue
+        indextuple = (
+            item[start_x],
+            item[start_y],
+            item[end_x],
+            item[end_y],
+        )
+        if indextuple in alreadydone:
+            allresults_append(alreadydone[indextuple])
+            continue
+        alreadydone[indextuple] = tuple((int(k[2]),int(k[1]), int(k[0]))
+        for k in np.unique(
+        np.ascontiguousarray(
+            np.concatenate(
+                [item[screenshot_column], np.full((item[screenshot_column].shape[0], item[screenshot_column].shape[1], 1), 255, dtype=item[screenshot_column].dtype)], axis=-1
+            )
+                ).view(np.uint32),
+                return_counts=False,
+        ).view(np.uint8).reshape((-1, 4))[..., :3])
+        allresults_append(alreadydone[indextuple])
+    df.loc[:,result_column] = allresults
+
+
+cdef unordered_map[uint32_t, double] count_colors_in_elements_algorithm_percentage(Py_ssize_t start_x, Py_ssize_t start_y, uint32_t[:,:,:] image, double area) noexcept nogil:
+    cdef:
+        Py_ssize_t i,j
+        unordered_map[uint32_t, Py_ssize_t] resultdict
+        unordered_map[uint32_t, Py_ssize_t].iterator it
+        unordered_map[uint32_t, Py_ssize_t].iterator itend
+        unordered_map[uint32_t, double] resultdict_float
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            resultdict[image[i][j][2] << 16 | image[i][j][1] << 8 | image[i][j][0]]+=1
+    it=resultdict.begin()
+    itend=resultdict.end()
+    while (it!=itend):
+        resultdict_float[deref(it).first]=(<double>(deref(it).second) / area) * 100.0
+        inc(it)
+    return resultdict_float
+
+cpdef count_colors_in_elements_percentage(
+    object df,
+    str result_column="aa_colorcount_percentage",
+    str screenshot_column="aa_screenshot",
+    str start_x="aa_start_x",
+    str start_y="aa_start_y",
+    str end_x="aa_end_x",
+    str end_y="aa_end_y",
+    ):
+    cdef:
+        list allresults = []
+        dict alreadydone = {}
+        object indextuple,item
+        object allresults_append=allresults.append
+    for _, item in df.iterrows():
+        if not np.any(item[screenshot_column]):
+            allresults_append([])
+            continue
+        indextuple = (
+            item[start_x],
+            item[start_y],
+            item[end_x],
+            item[end_y],
+        )
+        if indextuple in alreadydone:
+            allresults_append(alreadydone[indextuple])
+            continue
+        alreadydone[indextuple] = {(((k >> 16) & 0xFF),((k >> 8) & 0xFF),(k & 0xFF)):v
+            for k,v in sorted(dict(count_colors_in_elements_algorithm_percentage(
+            start_x=item[start_x],
+            start_y=item[start_y],
+            image=item[screenshot_column].astype(np.uint32),
+            area=float(item["aa_area"]))).items(), key=_sort_float_dict, reverse=True
+        )}
+        allresults_append(alreadydone[indextuple])
+    df.loc[:,result_column] = np.asarray(allresults, dtype="object")
+
 cdef vec_rgbxycount search_colors_rgb_with_count(Py_ssize_t start_x, Py_ssize_t start_y, uint8_t[:,:,:] image, uint8_t[:,:] colors) noexcept nogil:
     cdef:
         vec_rgbxycount results
@@ -2397,7 +2588,6 @@ cpdef search_for_colors_in_elements(
             colors=colors,
         )
         allresults_append(alreadydone[indextuple])
-
     df.loc[:,result_column] = np.asarray(allresults, dtype="object")
 
 cdef list[list[Py_ssize_t]] _tesser_group_words(
@@ -3106,6 +3296,152 @@ cpdef d_save_screenshots_as_ppm(
     return savedfiles
 
 
+cpdef d_color_count(self, result_column, screenshot_column="aa_screenshot"):
+    if screenshot_column not in self.columns:
+        raise IndexError(f"{screenshot_column} column not found")
+    first_resultcolumn = f"{result_column}"
+    try:
+        count_colors_in_elements(
+            df=self,
+            result_column=first_resultcolumn,
+            screenshot_column=screenshot_column,
+            start_x="aa_start_x",
+            start_y="aa_start_y",
+            end_x="aa_end_x",
+            end_y="aa_end_y",
+        )
+    except Exception:
+        self.loc[:, result_column] = np.asarray(
+            [[] for _ in range(len(self))], dtype="object"
+        )
+
+cpdef d_color_count_percentage(self, result_column, screenshot_column="aa_screenshot"):
+    if screenshot_column not in self.columns:
+        raise IndexError(f"{screenshot_column} column not found")
+    first_resultcolumn = f"{result_column}"
+    try:
+        count_colors_in_elements_percentage(
+            df=self,
+            result_column=first_resultcolumn,
+            screenshot_column=screenshot_column,
+            start_x="aa_start_x",
+            start_y="aa_start_y",
+            end_x="aa_end_x",
+            end_y="aa_end_y",
+        )
+    except Exception:
+        self.loc[:, result_column] = np.asarray(
+            [[] for _ in range(len(self))], dtype="object"
+        )
+
+cpdef d_calculate_color_average(self, result_column, screenshot_column="aa_screenshot"):
+    if screenshot_column not in self.columns:
+        raise IndexError(f"{screenshot_column} column not found")
+    first_resultcolumn = f"{result_column}"
+    try:
+        calculate_average_colors_in_elements(
+            df=self,
+            result_column=first_resultcolumn,
+            screenshot_column=screenshot_column,
+            start_x="aa_start_x",
+            start_y="aa_start_y",
+            end_x="aa_end_x",
+            end_y="aa_end_y",
+        )
+    except Exception:
+        self.loc[:, result_column] = np.asarray(
+            [[] for _ in range(len(self))], dtype="object"
+        )
+
+cpdef d_get_unique_colors(self, result_column, screenshot_column="aa_screenshot"):
+    if screenshot_column not in self.columns:
+        raise IndexError(f"{screenshot_column} column not found")
+    first_resultcolumn = f"{result_column}"
+    try:
+        get_unique_colors_in_elements(
+            df=self,
+            result_column=first_resultcolumn,
+            screenshot_column=screenshot_column,
+            start_x="aa_start_x",
+            start_y="aa_start_y",
+            end_x="aa_end_x",
+            end_y="aa_end_y",
+        )
+    except Exception:
+        self.loc[:, result_column] = np.asarray(
+            [[] for _ in range(len(self))], dtype="object"
+        )
+
+cpdef d_match_template_scipy(
+    self,
+    needle,
+    result_column,
+    screenshot_column="aa_screenshot",
+):
+    cdef:
+        list allresults = []
+    if not template_matching_available:
+        raise RuntimeError("Template Matching not available")
+    if screenshot_column not in self.columns:
+        raise IndexError(f"{screenshot_column} column not found")
+    if len(needle.shape) == 2:
+        coin = needle
+    else:
+        coin = color.rgb2gray(needle)
+    for image in self[screenshot_column]:
+        try:
+            if image.shape[0] < coin.shape[0] or image.shape[1] < coin.shape[1]:
+                allresults.append((-1, -1, -1))
+                continue
+            result = match_template(color.rgb2gray(image), coin)
+            ij = np.unravel_index(np.argmax(result), result.shape)
+            y, x = ij
+            allresults.append((round(float(np.max(result)), 4), int(x), int(y)))
+        except Exception:
+            allresults.append((-1, -1, -1))
+    self.loc[:, result_column] = allresults
+
+cpdef d_get_twins(self, result_column, bint with_own_index=True, screenshot_column="aa_screenshot"):
+    cdef:
+        uint32_t len_all_screenshots, i, j
+        unordered_set[uint64_t] brotherset
+        list[list[uint32_t]] all_brothers
+        object all_screenshots
+        uint32_t[:] self_index = self.index.__array__().astype(np.uint32)
+    if screenshot_column not in self.columns:
+        raise IndexError(f"{screenshot_column} column not found")
+    first_resultcolumn = f"{result_column}"
+    try:
+        len_all_screenshots = len(self[screenshot_column])
+        all_brothers=[]
+        for i in range(len_all_screenshots):
+            if with_own_index:
+                all_brothers.append([i])
+            else:
+                all_brothers.append([])
+            if not np.any(self[screenshot_column][i]):
+                continue
+            for j in range(len_all_screenshots):
+                if i == j :
+                    continue
+                if brotherset.contains((<uint64_t>i << 32) | <uint64_t>j) or brotherset.contains((<uint64_t>j << 32) | <uint64_t>i):
+                    all_brothers[len(all_brothers)-1].append(self_index[j])
+                    continue
+                if np.array_equal(self[screenshot_column][i], self[screenshot_column][j]):
+                    brotherset.insert((<uint64_t>i << 32) | <uint64_t>j)
+                    brotherset.insert((<uint64_t>j << 32) | <uint64_t>i)
+                    all_brothers[len(all_brothers)-1].append(self_index[j])
+        if with_own_index:
+            self.loc[:,result_column] = [sorted(q) for q in all_brothers]
+        else:
+            self.loc[:,result_column] = all_brothers
+    except Exception:
+        self.loc[:, result_column] = np.asarray(
+            [[] for _ in range(len(self))], dtype="object"
+        )
+
+
+
 cpdef d_color_search(self, colors, result_column, screenshot_column="aa_screenshot"):
     """
     Searches for the given colors in the given column of the dataframe,
@@ -3126,7 +3462,7 @@ cpdef d_color_search(self, colors, result_column, screenshot_column="aa_screensh
     -------
     None
     """
-    if "aa_screenshot" not in self.columns:
+    if screenshot_column not in self.columns:
         raise IndexError(f"{screenshot_column} column not found")
     if len(colors) == 0:
         return
@@ -11091,4 +11427,10 @@ DataFrame.d_fm_subsequence_v2 = d_fm_subsequence_v2
 DataFrame.bb_save_screenshots_as_png = d_save_screenshots_as_png
 DataFrame.bb_save_screenshots_as_ppm = d_save_screenshots_as_ppm
 DataFrame.bb_search_for_colors = d_color_search
+DataFrame.bb_count_colors = d_color_count
+DataFrame.bb_count_colors_percentage = d_color_count_percentage
+DataFrame.bb_calculate_color_average = d_calculate_color_average
+DataFrame.bb_get_unique_colors = d_get_unique_colors
+DataFrame.bb_get_twins = d_get_twins
+DataFrame.bb_match_template_scipy = d_match_template_scipy
 
